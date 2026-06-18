@@ -1,10 +1,23 @@
-// Turns the user's table edits into a precise, natural-language instruction for
+// Turns the user's table edits into a precise, STRUCTURED (JSON) instruction for
 // the image model by diffing the edited analysis against the original one.
+//
+// The image model is sent a JSON object that lists exactly which fields changed
+// (from -> to) for each element, plus a strict directive to change ONLY those
+// and keep everything else identical. This gives far more precise edits than a
+// loose natural-language sentence.
 
-import type { RoomAnalysis, RoomObject } from "./types";
+import type { ColorInfo, RoomAnalysis, RoomObject } from "./types";
 
 function norm(s: string | undefined): string {
   return (s ?? "").trim().toLowerCase();
+}
+
+function colorStr(c: ColorInfo | undefined): string {
+  return [c?.name, c?.hex].map((p) => (p ?? "").trim()).filter(Boolean).join(" ");
+}
+
+function colorChanged(a: ColorInfo | undefined, b: ColorInfo | undefined): boolean {
+  return norm(a?.name) !== norm(b?.name) || norm(a?.hex) !== norm(b?.hex);
 }
 
 function describe(o: RoomObject): string {
@@ -14,10 +27,29 @@ function describe(o: RoomObject): string {
     .join(" ");
 }
 
+/** Drop empty/whitespace values from an object. */
+function clean(obj: Record<string, string>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(obj)) if (v && v.trim()) out[k] = v.trim();
+  return out;
+}
+
+type FieldChange = { from: string; to: string };
+
+interface ObjectEdit {
+  action: "modify" | "add" | "remove";
+  element: string;
+  location?: string;
+  changes?: Record<string, FieldChange>;
+  spec?: Record<string, string>;
+}
+
 export interface EditPlan {
-  /** One human-readable sentence per change. */
+  /** Human-readable bullets for the UI. */
   changes: string[];
-  /** Full prompt sent to the image model. */
+  /** The structured edit object (also what gets serialized and sent). */
+  editJson: unknown;
+  /** JSON string actually sent to the image model. */
   instruction: string;
   hasChanges: boolean;
 }
@@ -27,74 +59,120 @@ export function buildEditPlan(
   current: RoomAnalysis,
   extraInstructions: string
 ): EditPlan {
-  const changes: string[] = [];
+  const bullets: string[] = [];
+  const objectEdits: ObjectEdit[] = [];
+  const sceneChanges: Record<string, FieldChange> = {};
 
-  // Scene-level changes.
+  // ---- scene-level ----
   if (norm(baseline.room_style) !== norm(current.room_style) && current.room_style) {
-    changes.push(`Change the overall room style to ${current.room_style}.`);
+    sceneChanges.room_style = { from: baseline.room_style, to: current.room_style };
+    bullets.push(`Overall style → ${current.room_style}.`);
   }
   if (
     norm(baseline.lighting?.description) !== norm(current.lighting?.description) &&
     current.lighting?.description
   ) {
-    changes.push(`Adjust the lighting so it is ${current.lighting.description}.`);
+    sceneChanges.lighting = {
+      from: baseline.lighting?.description || "",
+      to: current.lighting.description,
+    };
+    bullets.push(`Lighting → ${current.lighting.description}.`);
   }
 
   const baseById = new Map(baseline.objects.map((o) => [o.id, o]));
   const curById = new Map(current.objects.map((o) => [o.id, o]));
 
-  // Removed objects.
+  // ---- removed ----
   for (const b of baseline.objects) {
     if (!curById.has(b.id)) {
-      const where = b.location ? ` (${b.location})` : "";
-      changes.push(`Remove the ${describe(b)}${where}.`);
+      objectEdits.push({
+        action: "remove",
+        element: b.name,
+        location: b.location || undefined,
+      });
+      bullets.push(`Remove the ${describe(b)}${b.location ? ` (${b.location})` : ""}.`);
     }
   }
 
-  // Added or modified objects.
+  // ---- added / modified ----
   for (const c of current.objects) {
     const b = baseById.get(c.id);
+
     if (!b) {
-      const where = c.location ? ` at ${c.location}` : "";
-      changes.push(`Add a ${describe(c)}${where}.`);
+      objectEdits.push({
+        action: "add",
+        element: c.name,
+        location: c.location || undefined,
+        spec: clean({
+          color: colorStr(c.color),
+          material: c.material,
+          finish: c.finish,
+          quantity: c.quantity > 1 ? String(c.quantity) : "",
+        }),
+      });
+      bullets.push(`Add a ${describe(c)}${c.location ? ` at ${c.location}` : ""}.`);
       continue;
     }
 
-    const edits: string[] = [];
+    const fieldChanges: Record<string, FieldChange> = {};
     if (norm(b.name) !== norm(c.name)) {
-      edits.push(`replace it with a ${c.name}`);
+      fieldChanges.type = { from: b.name, to: c.name };
     }
-    if (norm(b.color?.name) !== norm(c.color?.name) && c.color?.name) {
-      const hex = c.color?.hex ? ` (${c.color.hex})` : "";
-      edits.push(`change its color to ${c.color.name}${hex}`);
+    if (colorChanged(b.color, c.color) && (c.color?.name || c.color?.hex)) {
+      fieldChanges.color = { from: colorStr(b.color), to: colorStr(c.color) };
     }
     if (norm(b.material) !== norm(c.material) && c.material) {
-      edits.push(`change its material to ${c.material}`);
+      fieldChanges.material = { from: b.material, to: c.material };
     }
     if (norm(b.finish) !== norm(c.finish) && c.finish) {
-      edits.push(`change its finish to ${c.finish}`);
+      fieldChanges.finish = { from: b.finish || "", to: c.finish };
     }
     if (b.quantity !== c.quantity) {
-      edits.push(`change the quantity to ${c.quantity}`);
+      fieldChanges.quantity = { from: String(b.quantity), to: String(c.quantity) };
     }
-    if (edits.length) {
-      const where = b.location ? ` at ${b.location}` : "";
-      changes.push(`For the ${b.name}${where}: ${edits.join(", ")}.`);
+    if (norm(b.location) !== norm(c.location) && c.location) {
+      fieldChanges.location = { from: b.location || "", to: c.location };
+    }
+
+    if (Object.keys(fieldChanges).length) {
+      objectEdits.push({
+        action: "modify",
+        element: b.name,
+        location: b.location || undefined,
+        changes: fieldChanges,
+      });
+      const parts = Object.entries(fieldChanges).map(([k, v]) => `${k}: ${v.to}`);
+      bullets.push(`${b.name}${b.location ? ` (${b.location})` : ""} → ${parts.join(", ")}.`);
     }
   }
 
   const extra = extraInstructions.trim();
-  if (extra) changes.push(extra);
+  if (extra) bullets.push(extra);
 
-  const instruction = [
-    "You are an expert interior-design photo editor. Edit the provided room",
-    "photograph to apply ONLY the changes listed below. Keep the camera angle,",
-    "perspective, room geometry, and every object that is not mentioned exactly",
-    "the same. The result must be photorealistic and seamless.",
-    "",
-    "Changes to apply:",
-    ...changes.map((c, i) => `${i + 1}. ${c}`),
-  ].join("\n");
+  const editJson = {
+    task: "edit_image",
+    instruction:
+      "Edit the provided interior photograph by applying ONLY the edits listed " +
+      "below. Preserve everything else EXACTLY as in the original: same camera " +
+      "angle, framing, perspective, walls, floor, ceiling, windows, room layout, " +
+      "lighting and shadows, and every object that is not listed. Do not " +
+      "re-render, restyle, or move anything that is not in the edits. The result " +
+      "must be photorealistic and seamless.",
+    ...(Object.keys(sceneChanges).length ? { scene_changes: sceneChanges } : {}),
+    object_edits: objectEdits,
+    ...(extra ? { additional_instructions: extra } : {}),
+    preserve:
+      "Everything not explicitly listed in scene_changes, object_edits or " +
+      "additional_instructions must stay pixel-faithful to the original image.",
+  };
 
-  return { changes, instruction, hasChanges: changes.length > 0 };
+  const hasChanges =
+    objectEdits.length > 0 || Object.keys(sceneChanges).length > 0 || !!extra;
+
+  return {
+    changes: bullets,
+    editJson,
+    instruction: JSON.stringify(editJson, null, 2),
+    hasChanges,
+  };
 }
