@@ -287,13 +287,14 @@ export default function Home() {
               {plan && plan.changes.length > 0 && (
                 <details className="mt-3 text-sm">
                   <summary className="cursor-pointer text-slate-600">
-                    Preview the edit instruction
+                    Preview the JSON sent to the model
                   </summary>
                   <ul className="mt-2 list-disc space-y-1 pl-5 text-slate-600">
                     {plan.changes.map((c, i) => (
                       <li key={i}>{c}</li>
                     ))}
                   </ul>
+                  <pre className="mt-2 max-h-56 overflow-auto rounded-md bg-slate-900 p-3 text-[11px] leading-snug text-slate-100">{plan.instruction}</pre>
                 </details>
               )}
             </div>
@@ -331,11 +332,9 @@ export default function Home() {
           {lastInstruction && (
             <details className="rounded-xl border border-slate-200 bg-white p-4 text-sm">
               <summary className="cursor-pointer font-medium text-slate-700">
-                What we asked the model to change
+                JSON edit instructions sent to the model
               </summary>
-              <pre className="mt-2 whitespace-pre-wrap text-xs text-slate-600">
-                {lastInstruction}
-              </pre>
+              <pre className="mt-2 max-h-72 overflow-auto whitespace-pre-wrap rounded-md bg-slate-900 p-3 text-[11px] leading-snug text-slate-100">{lastInstruction}</pre>
             </details>
           )}
         </div>
