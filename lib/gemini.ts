@@ -3,9 +3,13 @@
 // This app is a fully static site (GitHub Pages), so there is no server to hold
 // a secret key. Each user supplies their OWN Gemini API key in the UI; it is
 // stored only in their browser (localStorage) and sent directly to Google.
+//
+// The @google/genai SDK is imported lazily (only when a request is actually
+// made) so it stays out of the initial page bundle. That keeps first load small
+// and guarantees the core UI — including saving the API key — never depends on
+// the SDK loading.
 "use client";
 
-import { GoogleGenAI, Modality } from "@google/genai";
 import { ANALYSIS_PROMPT } from "./prompts";
 import type {
   BoundingBox,
@@ -35,6 +39,7 @@ export async function analyzeImage(
   base64: string,
   mimeType: string
 ): Promise<RoomAnalysis> {
+  const { GoogleGenAI } = await import("@google/genai");
   const ai = new GoogleGenAI({ apiKey });
   try {
     const res = await ai.models.generateContent({
@@ -63,6 +68,7 @@ export async function generateImage(
   mimeType: string,
   instruction: string
 ): Promise<EditorImage> {
+  const { GoogleGenAI, Modality } = await import("@google/genai");
   const ai = new GoogleGenAI({ apiKey });
   try {
     const res = await ai.models.generateContent({

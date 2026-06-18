@@ -151,7 +151,7 @@ export default function Home() {
                 loaded && apiKey ? "bg-emerald-500" : "bg-amber-400",
               ].join(" ")}
             />
-            API key
+            {loaded && apiKey ? "API key ✓" : "Add API key"}
           </button>
           {stage !== "upload" && (
             <button
