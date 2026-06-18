@@ -1,95 +1,98 @@
-// Server-only helpers that talk to the Gemini API.
-// The API key lives in process.env and is never exposed to the browser.
+// Client-side Gemini calls (bring-your-own-key).
+//
+// This app is a fully static site (GitHub Pages), so there is no server to hold
+// a secret key. Each user supplies their OWN Gemini API key in the UI; it is
+// stored only in their browser (localStorage) and sent directly to Google.
+"use client";
 
 import { GoogleGenAI, Modality } from "@google/genai";
 import { ANALYSIS_PROMPT } from "./prompts";
 import type {
   BoundingBox,
   ColorInfo,
+  EditorImage,
   RoomAnalysis,
   RoomObject,
 } from "./types";
 
-export const ANALYZE_MODEL = process.env.ANALYZE_MODEL || "gemini-2.5-flash";
-export const IMAGE_MODEL =
-  process.env.IMAGE_MODEL || "gemini-3-pro-image-preview";
+export const ANALYZE_MODEL = "gemini-2.5-flash";
+export const IMAGE_MODEL = "gemini-3-pro-image-preview";
 
-let client: GoogleGenAI | null = null;
-
-function getClient(): GoogleGenAI {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
-    throw new Error(
-      "GEMINI_API_KEY is not set. Add it to .env.local (see .env.example)."
+function friendlyError(err: unknown): Error {
+  const msg = err instanceof Error ? err.message : String(err);
+  if (/api[_ ]?key|API_KEY|invalid|permission|401|403/i.test(msg)) {
+    return new Error(
+      "Your Gemini API key was rejected. Check that it's correct and that billing is enabled. " +
+        `(${msg})`
     );
   }
-  if (!client) client = new GoogleGenAI({ apiKey });
-  return client;
+  return new Error(msg);
 }
 
 /** Turn an interior photo into the structured, editable room analysis. */
 export async function analyzeImage(
+  apiKey: string,
   base64: string,
   mimeType: string
 ): Promise<RoomAnalysis> {
-  const ai = getClient();
-  const res = await ai.models.generateContent({
-    model: ANALYZE_MODEL,
-    contents: [
-      {
-        role: "user",
-        parts: [
-          { inlineData: { mimeType, data: base64 } },
-          { text: ANALYSIS_PROMPT },
-        ],
-      },
-    ],
-    config: {
-      responseMimeType: "application/json",
-      temperature: 0.2,
-    },
-  });
-
-  const text = res.text ?? "";
-  return normalizeAnalysis(parseJsonLoose(text));
+  const ai = new GoogleGenAI({ apiKey });
+  try {
+    const res = await ai.models.generateContent({
+      model: ANALYZE_MODEL,
+      contents: [
+        {
+          role: "user",
+          parts: [
+            { inlineData: { mimeType, data: base64 } },
+            { text: ANALYSIS_PROMPT },
+          ],
+        },
+      ],
+      config: { responseMimeType: "application/json", temperature: 0.2 },
+    });
+    return normalizeAnalysis(parseJsonLoose(res.text ?? ""));
+  } catch (err) {
+    throw friendlyError(err);
+  }
 }
 
 /** Edit/regenerate the room photo from a natural-language instruction. */
 export async function generateImage(
+  apiKey: string,
   base64: string,
   mimeType: string,
   instruction: string
-): Promise<{ data: string; mimeType: string }> {
-  const ai = getClient();
-  const res = await ai.models.generateContent({
-    model: IMAGE_MODEL,
-    contents: [
-      {
-        role: "user",
-        parts: [
-          { inlineData: { mimeType, data: base64 } },
-          { text: instruction },
-        ],
-      },
-    ],
-    config: {
-      // Nano Banana Pro returns the edited photo as an inline image part.
-      responseModalities: [Modality.IMAGE],
-    },
-  });
-
-  const parts = res.candidates?.[0]?.content?.parts ?? [];
-  for (const part of parts) {
-    if (part.inlineData?.data) {
-      return {
-        data: part.inlineData.data,
-        mimeType: part.inlineData.mimeType || "image/png",
-      };
+): Promise<EditorImage> {
+  const ai = new GoogleGenAI({ apiKey });
+  try {
+    const res = await ai.models.generateContent({
+      model: IMAGE_MODEL,
+      contents: [
+        {
+          role: "user",
+          parts: [
+            { inlineData: { mimeType, data: base64 } },
+            { text: instruction },
+          ],
+        },
+      ],
+      config: { responseModalities: [Modality.IMAGE] },
+    });
+    const parts = res.candidates?.[0]?.content?.parts ?? [];
+    for (const part of parts) {
+      if (part.inlineData?.data) {
+        const mt = part.inlineData.mimeType || "image/png";
+        return {
+          dataUrl: `data:${mt};base64,${part.inlineData.data}`,
+          mimeType: mt,
+        };
+      }
     }
+    const said = res.text ? ` Model response: ${res.text}` : "";
+    throw new Error(`The image model did not return an image.${said}`);
+  } catch (err) {
+    throw friendlyError(err);
   }
-
-  const said = res.text ? ` Model response: ${res.text}` : "";
-  throw new Error(`The image model did not return an image.${said}`);
 }
 
 // ---------------------------------------------------------------------------
@@ -102,7 +105,6 @@ function parseJsonLoose(text: string): unknown {
   try {
     return JSON.parse(trimmed);
   } catch {
-    // Strip markdown fences if present.
     const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
     if (fenced) {
       try {
@@ -111,7 +113,6 @@ function parseJsonLoose(text: string): unknown {
         /* fall through */
       }
     }
-    // Last resort: grab the outermost { ... } block.
     const first = trimmed.indexOf("{");
     const last = trimmed.lastIndexOf("}");
     if (first !== -1 && last > first) {
@@ -135,7 +136,6 @@ function toColor(v: unknown): ColorInfo {
     const o = v as Record<string, unknown>;
     return { name: str(o.name), hex: str(o.hex) };
   }
-  // Sometimes a model returns just a string color.
   return { name: str(v), hex: "" };
 }
 

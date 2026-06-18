@@ -8,26 +8,21 @@ import { ScenePanel } from "@/components/ScenePanel";
 import { CompareSlider } from "@/components/CompareSlider";
 import { Spinner } from "@/components/Spinner";
 import { Stepper, type StepKey } from "@/components/Stepper";
+import { ApiKeyDialog } from "@/components/ApiKeyDialog";
+import { analyzeImage, generateImage } from "@/lib/gemini";
 import { buildEditPlan } from "@/lib/diff";
 import { splitDataUrl } from "@/lib/image";
+import { useApiKey } from "@/lib/useApiKey";
 import type { EditorImage, RoomAnalysis } from "@/lib/types";
 
 type Stage = "upload" | "editing" | "result";
 
-async function postJson<T>(url: string, body: unknown): Promise<T> {
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data?.error || `Request failed (${res.status}).`);
-  return data as T;
-}
-
 const clone = <T,>(v: T): T => JSON.parse(JSON.stringify(v));
 
 export default function Home() {
+  const { apiKey, setApiKey, clearKey, loaded } = useApiKey();
+  const [showKeyDialog, setShowKeyDialog] = useState(false);
+
   const [stage, setStage] = useState<Stage>("upload");
   const [baseImage, setBaseImage] = useState<EditorImage | null>(null);
   const [analysis, setAnalysis] = useState<RoomAnalysis | null>(null);
@@ -50,15 +45,22 @@ export default function Home() {
     [baseline, analysis, extra]
   );
 
+  function requireKey(): boolean {
+    if (!apiKey) {
+      setError("Add your Gemini API key first.");
+      setShowKeyDialog(true);
+      return false;
+    }
+    return true;
+  }
+
   async function analyze(image: EditorImage) {
+    if (!requireKey()) return;
     setError(null);
     setLoading("analyze");
     try {
       const { base64, mimeType } = splitDataUrl(image.dataUrl);
-      const { analysis: result } = await postJson<{ analysis: RoomAnalysis }>(
-        "/api/analyze",
-        { imageBase64: base64, mimeType }
-      );
+      const result = await analyzeImage(apiKey, base64, mimeType);
       setAnalysis(result);
       setBaseline(clone(result));
       setExtra("");
@@ -79,6 +81,7 @@ export default function Home() {
 
   async function generate() {
     if (!baseImage || !plan) return;
+    if (!requireKey()) return;
     if (!plan.hasChanges) {
       setError("Edit the table or add an instruction before generating.");
       return;
@@ -87,16 +90,9 @@ export default function Home() {
     setLoading("generate");
     try {
       const { base64, mimeType } = splitDataUrl(baseImage.dataUrl);
-      const { image, instruction } = await postJson<{
-        image: EditorImage;
-        instruction: string;
-      }>("/api/generate", {
-        imageBase64: base64,
-        mimeType,
-        instruction: plan.instruction,
-      });
+      const image = await generateImage(apiKey, base64, mimeType, plan.instruction);
       setGenerated(image);
-      setLastInstruction(instruction);
+      setLastInstruction(plan.instruction);
       setStage("result");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Generation failed.");
@@ -142,8 +138,21 @@ export default function Home() {
             Pro.
           </p>
         </div>
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-3">
           <Stepper active={stepKey} />
+          <button
+            onClick={() => setShowKeyDialog(true)}
+            className="flex items-center gap-1.5 rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-100"
+            title="Set your Gemini API key"
+          >
+            <span
+              className={[
+                "inline-block h-2 w-2 rounded-full",
+                loaded && apiKey ? "bg-emerald-500" : "bg-amber-400",
+              ].join(" ")}
+            />
+            API key
+          </button>
           {stage !== "upload" && (
             <button
               onClick={startOver}
@@ -154,6 +163,20 @@ export default function Home() {
           )}
         </div>
       </header>
+
+      {loaded && !apiKey && (
+        <div className="mb-4 flex items-center justify-between gap-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          <span>
+            Add your own Gemini API key to start. It stays in your browser only.
+          </span>
+          <button
+            onClick={() => setShowKeyDialog(true)}
+            className="shrink-0 rounded-md bg-amber-500 px-3 py-1.5 font-medium text-white hover:bg-amber-600"
+          >
+            Add key
+          </button>
+        </div>
+      )}
 
       {error && (
         <div className="mb-4 flex items-start justify-between gap-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
@@ -316,6 +339,15 @@ export default function Home() {
             </details>
           )}
         </div>
+      )}
+
+      {showKeyDialog && (
+        <ApiKeyDialog
+          initialKey={apiKey}
+          onSave={setApiKey}
+          onClear={clearKey}
+          onClose={() => setShowKeyDialog(false)}
+        />
       )}
     </main>
   );
