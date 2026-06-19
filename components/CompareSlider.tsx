@@ -38,7 +38,7 @@ export function CompareSlider({
     <div className="w-full">
       <div
         ref={wrapRef}
-        className="relative w-full overflow-hidden rounded-xl border border-slate-200 bg-slate-100"
+        className="relative w-full touch-none select-none overflow-hidden rounded-xl border border-slate-200 bg-slate-100"
         style={{ aspectRatio: String(ratio) }}
         onPointerDown={(e) => {
           dragging.current = true;
