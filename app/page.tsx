@@ -130,7 +130,7 @@ export default function Home() {
     <main className="mx-auto max-w-7xl px-4 py-6">
       <header className="mb-6 flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-slate-900">
+          <h1 className="text-xl font-bold tracking-tight text-slate-900 sm:text-2xl">
             Interior Image Editor
           </h1>
           <p className="text-sm text-slate-500">
@@ -138,8 +138,10 @@ export default function Home() {
             Pro.
           </p>
         </div>
-        <div className="flex items-center gap-3">
-          <Stepper active={stepKey} />
+        <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+          <div className="hidden sm:block">
+            <Stepper active={stepKey} />
+          </div>
           <button
             onClick={() => setShowKeyDialog(true)}
             className="flex items-center gap-1.5 rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-100"
@@ -261,17 +263,17 @@ export default function Home() {
                     ? `${plan.changes.length} pending change${plan.changes.length === 1 ? "" : "s"}`
                     : "No changes yet — edit the table to begin"}
                 </span>
-                <div className="flex items-center gap-2">
+                <div className="flex w-full items-center gap-2 sm:w-auto">
                   <button
                     onClick={copyJson}
-                    className="rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100"
+                    className="flex-1 rounded-md border border-slate-300 px-3 py-2.5 text-sm font-medium text-slate-600 hover:bg-slate-100 sm:flex-none sm:py-2"
                   >
                     {copied ? "Copied!" : "Copy JSON"}
                   </button>
                   <button
                     onClick={generate}
                     disabled={loading === "generate" || !plan?.hasChanges}
-                    className="rounded-md bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50"
+                    className="flex-1 rounded-md bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50 sm:flex-none sm:py-2"
                   >
                     {loading === "generate" ? "Generating…" : "Generate image"}
                   </button>
@@ -307,23 +309,23 @@ export default function Home() {
         <div className="mx-auto max-w-4xl space-y-5">
           <CompareSlider before={baseImage} after={generated} />
 
-          <div className="flex flex-wrap items-center justify-center gap-3">
+          <div className="flex flex-col items-stretch justify-center gap-3 sm:flex-row sm:flex-wrap sm:items-center">
             <button
               onClick={editMore}
-              className="rounded-md bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white hover:bg-slate-700"
+              className="w-full rounded-md bg-slate-900 px-5 py-3 text-center text-sm font-semibold text-white hover:bg-slate-700 sm:w-auto sm:py-2.5"
             >
               ✎ Edit more
             </button>
             <a
               href={generated.dataUrl}
               download={`edited-room.${generated.mimeType.includes("png") ? "png" : "jpg"}`}
-              className="rounded-md border border-slate-300 px-5 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-100"
+              className="w-full rounded-md border border-slate-300 px-5 py-3 text-center text-sm font-semibold text-slate-700 hover:bg-slate-100 sm:w-auto sm:py-2.5"
             >
               ⬇ Download
             </a>
             <button
               onClick={startOver}
-              className="rounded-md border border-slate-300 px-5 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-100"
+              className="w-full rounded-md border border-slate-300 px-5 py-3 text-center text-sm font-semibold text-slate-700 hover:bg-slate-100 sm:w-auto sm:py-2.5"
             >
               Start over
             </button>

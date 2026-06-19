@@ -34,7 +34,7 @@ export function ImageCanvas({
       <img
         src={image.dataUrl}
         alt="Room"
-        className="block h-auto max-h-[70vh] w-auto max-w-full rounded-xl"
+        className="block h-auto max-h-[50vh] w-auto max-w-full rounded-xl sm:max-h-[70vh]"
         onClick={() => onSelect(null)}
       />
       {objects.map((o) => {
