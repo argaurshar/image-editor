@@ -35,6 +35,11 @@ export default function Home() {
   const [loading, setLoading] = useState<null | "analyze" | "generate">(null);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [genProgress, setGenProgress] = useState<{
+    current: number;
+    total: number;
+    label: string;
+  } | null>(null);
 
   const stepKey: StepKey =
     stage === "upload" ? "upload" : stage === "editing" ? "edit" : "result";
@@ -88,16 +93,46 @@ export default function Home() {
     }
     setError(null);
     setLoading("generate");
+
+    // Apply each change in its own focused pass so every edit reliably lands
+    // (image models tend to skip some edits when many are requested at once).
+    let current = baseImage;
+    const failures: string[] = [];
     try {
-      const { base64, mimeType } = splitDataUrl(baseImage.dataUrl);
-      const image = await generateImage(apiKey, base64, mimeType, plan.instruction);
-      setGenerated(image);
-      setLastInstruction(plan.instruction);
+      for (let i = 0; i < plan.steps.length; i++) {
+        const step = plan.steps[i];
+        setGenProgress({ current: i + 1, total: plan.steps.length, label: step.label });
+        const { base64, mimeType } = splitDataUrl(current.dataUrl);
+        try {
+          current = await generateImage(apiKey, base64, mimeType, step.instruction);
+        } catch (e) {
+          failures.push(`${step.label} (${e instanceof Error ? e.message : "failed"})`);
+        }
+      }
+
+      if (current === baseImage) {
+        // Nothing succeeded — surface the first error.
+        throw new Error(failures[0] || "Generation failed.");
+      }
+
+      setGenerated(current);
+      setLastInstruction(
+        plan.steps
+          .map((s, i) => `// step ${i + 1}/${plan.steps.length}: ${s.label}\n${s.instruction}`)
+          .join("\n\n")
+      );
       setStage("result");
+      if (failures.length) {
+        setError(
+          `Applied ${plan.steps.length - failures.length} of ${plan.steps.length} changes. ` +
+            `Could not apply: ${failures.join("; ")}. Use “Edit more” to retry the rest.`
+        );
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Generation failed.");
     } finally {
       setLoading(null);
+      setGenProgress(null);
     }
   }
 
@@ -282,21 +317,30 @@ export default function Home() {
 
               {loading === "generate" && (
                 <div className="mt-3">
-                  <Spinner label="Nano Banana Pro is editing your room…" />
+                  <Spinner
+                    label={
+                      genProgress
+                        ? `Applying change ${genProgress.current} of ${genProgress.total}: ${genProgress.label}…`
+                        : "Nano Banana Pro is editing your room…"
+                    }
+                  />
                 </div>
               )}
 
               {plan && plan.changes.length > 0 && (
                 <details className="mt-3 text-sm">
                   <summary className="cursor-pointer text-slate-600">
-                    Preview the JSON sent to the model
+                    Preview the {plan.steps.length} JSON edit
+                    {plan.steps.length === 1 ? "" : "s"} (applied one at a time)
                   </summary>
                   <ul className="mt-2 list-disc space-y-1 pl-5 text-slate-600">
                     {plan.changes.map((c, i) => (
                       <li key={i}>{c}</li>
                     ))}
                   </ul>
-                  <pre className="mt-2 max-h-56 overflow-auto rounded-md bg-slate-900 p-3 text-[11px] leading-snug text-slate-100">{plan.instruction}</pre>
+                  <pre className="mt-2 max-h-56 overflow-auto rounded-md bg-slate-900 p-3 text-[11px] leading-snug text-slate-100">{plan.steps
+                    .map((s, i) => `// step ${i + 1}: ${s.label}\n${s.instruction}`)
+                    .join("\n\n")}</pre>
                 </details>
               )}
             </div>
