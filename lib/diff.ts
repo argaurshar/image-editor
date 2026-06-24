@@ -28,6 +28,14 @@ function describe(o: RoomObject): string {
     .join(" ");
 }
 
+/** The element's bounding box, only if it's a real (non-empty) region. */
+function region(o: RoomObject): number[] | undefined {
+  const b = o.bounding_box;
+  if (!Array.isArray(b) || b.length !== 4) return undefined;
+  const [ymin, xmin, ymax, xmax] = b;
+  return ymax - ymin > 0 && xmax - xmin > 0 ? b : undefined;
+}
+
 function clean(obj: Record<string, string>): Record<string, string> {
   const out: Record<string, string> = {};
   for (const [k, v] of Object.entries(obj)) if (v && v.trim()) out[k] = v.trim();
@@ -64,7 +72,11 @@ function stepInstruction(edit: Record<string, unknown>): string {
       task: "edit_image",
       instruction:
         "Edit the provided interior photograph to apply ONLY the single change " +
-        "described in `edit`. " +
+        "described in `edit`. Identify the target element using `element`, its " +
+        "`currently` appearance, its `location`, and `region` — a bounding box " +
+        "[ymin, xmin, ymax, xmax] normalized to 0-1000 (top-left origin) marking " +
+        "exactly where the element is. Apply the change so it is clearly and " +
+        "unambiguously visible in the result. " +
         PRESERVE,
       edit,
       preserve:
@@ -124,7 +136,9 @@ export function buildEditPlan(
         instruction: stepInstruction({
           action: "remove",
           element: b.name,
+          currently: describe(b) || undefined,
           location: b.location || undefined,
+          region: region(b),
         }),
       });
     }
@@ -181,7 +195,9 @@ export function buildEditPlan(
         instruction: stepInstruction({
           action: "modify",
           element: b.name,
+          currently: describe(b) || undefined,
           location: b.location || undefined,
+          region: region(b),
           changes: fieldChanges,
         }),
       });
