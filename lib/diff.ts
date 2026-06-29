@@ -76,7 +76,10 @@ function stepInstruction(edit: Record<string, unknown>): string {
         "`currently` appearance, its `location`, and `region` — a bounding box " +
         "[ymin, xmin, ymax, xmax] normalized to 0-1000 (top-left origin) marking " +
         "exactly where the element is. Apply the change so it is clearly and " +
-        "unambiguously visible in the result. " +
+        "unambiguously visible in the result. If `edit.keep_shape` is true, change " +
+        "ONLY the element's surface appearance (its color, material and/or finish) " +
+        "and preserve its EXACT shape, silhouette, proportions, size and position " +
+        "— do not redraw, reshape, restyle, resize, or replace the object's form. " +
         PRESERVE,
       edit,
       preserve:
@@ -188,6 +191,8 @@ export function buildEditPlan(
     if (Object.keys(fieldChanges).length) {
       const parts = Object.entries(fieldChanges).map(([k, v]) => `${k}: ${v.to}`);
       bullets.push(`${b.name}${b.location ? ` (${b.location})` : ""} → ${parts.join(", ")}.`);
+      // Surface-only edits (no object-type swap) must keep the exact form.
+      const keepShape = !fieldChanges.type;
       objectSteps.push({
         label: `${b.name}: ${Object.entries(fieldChanges)
           .map(([k, v]) => `${k}→${v.to}`)
@@ -198,6 +203,7 @@ export function buildEditPlan(
           currently: describe(b) || undefined,
           location: b.location || undefined,
           region: region(b),
+          keep_shape: keepShape ? true : undefined,
           changes: fieldChanges,
         }),
       });
